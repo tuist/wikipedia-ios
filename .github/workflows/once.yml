@@ -1,0 +1,141 @@
+name: once
+
+# Builds and tests a wikimedia/wikipedia-ios commit with Once instead of
+# xcodebuild, using the tuist/wikipedia-ios Tuist project for the shared cache
+# and run reporting. Every runner starts with an empty local cache, so cache
+# hits come from Tuist.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+      remote_cache:
+        type: boolean
+        default: true
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: wikimedia/wikipedia-ios commit, branch, or tag to build (defaults to main)
+        type: string
+        default: main
+      remote_cache:
+        description: Use the Tuist remote cache (disable for a cold baseline)
+        type: boolean
+        default: true
+
+permissions: {}
+
+env:
+  ONCE_VERSION: 0.62.2
+  # The Xcode wikimedia/wikipedia-ios runs its unit tests with.
+  XCODE_VERSION: "26.5"
+
+jobs:
+  once:
+    name: once (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # The GitHub-hosted runner wikimedia/wikipedia-ios uses for unit tests.
+        os: [macos-26]
+    steps:
+      - name: Check out wikimedia/wikipedia-ios
+        uses: actions/checkout@v6
+        with:
+          repository: wikimedia/wikipedia-ios
+          ref: ${{ inputs.ref }}
+          path: wikipedia-ios
+          persist-credentials: false
+      - name: Check out the Once overlay
+        uses: actions/checkout@v6
+        with:
+          path: overlay
+          sparse-checkout: |
+            overlay
+            scripts
+          persist-credentials: false
+      - name: Apply the overlay
+        working-directory: wikipedia-ios
+        env:
+          REMOTE_CACHE: ${{ inputs.remote_cache }}
+        run: |
+          set -euo pipefail
+          if [ "${REMOTE_CACHE}" = "true" ]; then
+            cp ../overlay/overlay/once.toml once.toml
+          fi
+          echo "WIKIPEDIA_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -switch "/Applications/Xcode_${XCODE_VERSION}.app"
+          xcodebuild -version
+      - name: Install Once
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "${RUNNER_OS}-${RUNNER_ARCH}" in
+            macOS-ARM64) triple=aarch64-apple-darwin ;;
+            macOS-X64) triple=x86_64-apple-darwin ;;
+          esac
+          mkdir -p "${RUNNER_TEMP}/once"
+          gh release download "${ONCE_VERSION}" -R tuist/once \
+            -p "once-${ONCE_VERSION}-${triple}.tar.gz" -O - | tar xz -C "${RUNNER_TEMP}/once"
+          echo "${RUNNER_TEMP}/once" >> "$GITHUB_PATH"
+      - name: Authenticate with Tuist
+        if: inputs.remote_cache
+        working-directory: wikipedia-ios
+        run: once auth login --provider tuist --no-browser
+      - name: Load the graph
+        working-directory: wikipedia-ios
+        run: |
+          start=$(date +%s)
+          once query targets > "${RUNNER_TEMP}/targets.txt"
+          echo "GRAPH_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+          grep -c '^  ' "${RUNNER_TEMP}/targets.txt" || true
+      - name: once build
+        working-directory: wikipedia-ios
+        run: |
+          set -o pipefail
+          start=$(date +%s)
+          once --color never build Wikipedia 2>&1 | tee "${RUNNER_TEMP}/build.log"
+          echo "BUILD_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+      - name: once test
+        working-directory: wikipedia-ios
+        run: |
+          set -o pipefail
+          start=$(date +%s)
+          status=0
+          # With no target, Once runs the project's first-party tests: the
+          # Wikipedia unit tests and the WMF* local packages.
+          once --color never test 2>&1 | tee "${RUNNER_TEMP}/test.log" || status=$?
+          echo "TEST_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+          echo "TEST_STATUS=${status}" >> "$GITHUB_ENV"
+      - name: Summarize
+        if: always()
+        env:
+          REMOTE_CACHE: ${{ inputs.remote_cache }}
+        run: |
+          python3 overlay/scripts/summarize.py \
+            --os "${{ matrix.os }}" --sha "${WIKIPEDIA_SHA:-unknown}" --remote-cache "${REMOTE_CACHE}" \
+            --graph-seconds "${GRAPH_SECONDS:-}" --build-seconds "${BUILD_SECONDS:-}" \
+            --test-seconds "${TEST_SECONDS:-}" --test-status "${TEST_STATUS:-}" \
+            --build-log "${RUNNER_TEMP}/build.log" --test-log "${RUNNER_TEMP}/test.log" \
+            --json "${RUNNER_TEMP}/summary.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: once-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/summary.json
+            ${{ runner.temp }}/build.log
+            ${{ runner.temp }}/test.log
+            ${{ runner.temp }}/targets.txt
+          if-no-files-found: ignore

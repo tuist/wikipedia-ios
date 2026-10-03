@@ -1,0 +1,11 @@
+# Copied into the wikimedia/wikipedia-ios checkout by .github/workflows/once.yml.
+# Once derives the build graph from Wikipedia.xcodeproj; this file only
+# points the shared cache and run reporting at the tuist/wikipedia-ios project.
+
+[infrastructure.cache]
+provider = "tuist"
+
+[infrastructures.tuist]
+kind = "tuist"
+account = "tuist"
+project = "wikipedia-ios"
