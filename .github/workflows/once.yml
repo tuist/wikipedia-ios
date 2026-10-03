@@ -28,7 +28,7 @@ on:
 permissions: {}
 
 env:
-  ONCE_VERSION: 0.62.3
+  ONCE_VERSION: 0.63.0
   # The Xcode wikimedia/wikipedia-ios runs its unit tests with.
   XCODE_VERSION: "26.5"
 
