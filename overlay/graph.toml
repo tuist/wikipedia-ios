@@ -1,0 +1,16 @@
+# Appended to once.toml in the wikimedia/wikipedia-ios checkout by
+# .github/workflows/once.yml. Once derives the build graph from
+# Wikipedia.xcodeproj; this only picks the build configuration. The workflow
+# tests WikipediaUnitTests with `Test`, the Wikipedia scheme's test
+# configuration (it defines TEST=1), and the WMFComponents and WMFData package
+# tests with `Debug`, their schemes' test configuration (their mocks are
+# DEBUG-only).
+
+[[target]]
+name = "xcode"
+kind = "xcode_workspace"
+srcs = ["Wikipedia.xcodeproj/project.pbxproj"]
+
+[target.attrs]
+project = "Wikipedia.xcodeproj"
+configuration = "Test"

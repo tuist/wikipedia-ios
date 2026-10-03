@@ -1,0 +1,11 @@
+# Appended to once.toml by .github/workflows/once.yml unless the run is a cold
+# baseline. Points the shared cache and run reporting at the
+# tuist/wikipedia-ios Tuist project.
+
+[infrastructure.cache]
+provider = "tuist"
+
+[infrastructures.tuist]
+kind = "tuist"
+account = "tuist"
+project = "wikipedia-ios"

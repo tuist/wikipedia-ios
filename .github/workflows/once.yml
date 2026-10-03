@@ -67,8 +67,9 @@ jobs:
           REMOTE_CACHE: ${{ inputs.remote_cache }}
         run: |
           set -euo pipefail
+          cp ../overlay/overlay/graph.toml once.toml
           if [ "${REMOTE_CACHE}" = "true" ]; then
-            cp ../overlay/overlay/once.toml once.toml
+            { echo; cat ../overlay/overlay/cache.toml; } >> once.toml
           fi
           echo "WIKIPEDIA_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - name: Select Xcode
@@ -112,9 +113,16 @@ jobs:
           set -o pipefail
           start=$(date +%s)
           status=0
-          # With no target, Once runs the project's first-party tests: the
-          # Wikipedia unit tests and the WMF* local packages.
-          once --color never test 2>&1 | tee "${RUNNER_TEMP}/test.log" || status=$?
+          # The unit test suites of the schemes wikimedia/wikipedia-ios tests
+          # on pull requests, each with its scheme's test configuration. A
+          # bare `once test` would also run the simulator UI tests, which
+          # upstream runs separately.
+          once --color never test WikipediaUnitTests 2>&1 | tee -a "${RUNNER_TEMP}/test.log" || status=$?
+          sed -i '' 's/^configuration = "Test"$/configuration = "Debug"/' once.toml
+          for target in XcodePackage_xcode_ios_WMFComponents_WMFComponentsTests \
+            XcodePackage_xcode_ios_WMFData_WMFDataTests; do
+            once --color never test "${target}" 2>&1 | tee -a "${RUNNER_TEMP}/test.log" || status=$?
+          done
           echo "TEST_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
           echo "TEST_STATUS=${status}" >> "$GITHUB_ENV"
       - name: Summarize
